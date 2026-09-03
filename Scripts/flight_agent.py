@@ -1,4 +1,5 @@
 # Importing Dependencies
+from langchain_mcp_adapters.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
 from langchain.agents import create_agent
@@ -30,7 +31,7 @@ class FlightAgentResponse(BaseModel):
     tickets: List[TicketDetails]
 
 # Defining an asynchronous function
-async def build_flight_agent(llm: BaseChatModel, agent_tools: list) -> CompiledStateGraph:
+async def build_flight_agent(llm: BaseChatModel, agent_tools: List[StructuredTool]) -> CompiledStateGraph:
     # Defining a system prompt
     flight_system_prompt=f"""
     You are a precise flight search expert.

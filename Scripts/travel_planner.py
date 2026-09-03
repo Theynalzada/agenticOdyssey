@@ -11,8 +11,8 @@ from flight_agent import build_flight_agent
 from hotel_agent import build_hotel_agent
 from visa_agent import build_visa_agent
 from langgraph.types import Command
-from tavily import TavilyClient
 from dotenv import load_dotenv
+from os import environ
 
 # Loading environment variables
 load_dotenv()
@@ -38,26 +38,15 @@ class SupervisorState(AgentState):
     hotel_filter: str = "highly rated"
     hotel_class: int = 5
     n_hotels: int = 5
-    
-# Defining a web search tool
-@tool
-def web_search(query: str) -> dict:
-    """Search the web for information"""
-    # Instantiating the tavily client
-    tavily=TavilyClient()
-    
-    # Searching the web for information
-    results=tavily.search(query=query,
-                        search_depth="advanced",
-                        max_results=10)
-    
-    # Returning the results
-    return results
 
 # Defining an asynchronous function
 async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph:
     # Instantiating the MCP client
-    mcp_client=MultiServerMCPClient(connections={"kiwi": {"transport": "streamable-http",
+    mcp_client=MultiServerMCPClient(connections={"tavily-mcp": {"command": "npx", 
+                                                                "transport": "stdio",
+                                                                "args": ["-y", "tavily-mcp"],
+                                                                "env": {"TAVILY_API_KEY": environ.get("TAVILY_API_KEY")}},
+                                                 "kiwi": {"transport": "streamable-http",
                                                           "url": "https://mcp.kiwi.com"}})
 
     # Extracting the MCP Tools
@@ -66,17 +55,17 @@ async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph
     # Filtering the tools needed for the agent
     flight_tools=[i for i in mcp_tools if i.name=="search-flight"]
     
+    # Filtering the tools needed for the agent
+    web_search_tools=[i for i in mcp_tools if "tavily" in i.name]
+    
     # Building the flight agent
     flight_agent=build_flight_agent(llm=llm, agent_tools=flight_tools)
     
     # Building the hotel agent
-    hotel_agent=build_hotel_agent(llm=llm, agent_tools=[web_search])
+    hotel_agent=build_hotel_agent(llm=llm, agent_tools=web_search_tools)
     
     # Building the hotel agent
-    visa_agent=build_visa_agent(llm=llm, agent_tools=[web_search])
-    
-    # Configuring the agent memory
-    agent_memory_config={"configurable": {"thread_id": "1"}}
+    visa_agent=build_visa_agent(llm=llm, agent_tools=web_search_tools)
     
     # Defining a tool to update the agent state
     @tool

@@ -1,4 +1,5 @@
 # Importing Dependencies
+from langchain_mcp_adapters.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
 from langchain.agents import create_agent
@@ -24,13 +25,12 @@ class HotelAgentResponse(BaseModel):
     hotels: List[HotelDetails] = Field(description="The list of matching hotels extracted from the search results.")
 
 # Defining an asynchronous function
-def build_hotel_agent(llm: BaseChatModel, agent_tools: list) -> CompiledStateGraph:
+def build_hotel_agent(llm: BaseChatModel, agent_tools: List[StructuredTool]) -> CompiledStateGraph:
     # Defining a system prompt
     hotel_system_prompt=f"""
     You are a hotel search expert. You are extremely capable of
     finding detailed information based on a user criteria.
-    You MUST use '{agent_tools[0].name}' tool to answer user's questions regarding hotels.
-    When using the '{agent_tools[0].name}' tool, prioritize querying domains like 'https://www.tripadvisor.com/', 
+    When searching for hotels, prioritize querying domains like 'https://www.tripadvisor.com/', 
     'https://www.booking.com/', and 'https://www.agoda.com/' to extract current user ratings, exact review counts, and facility details.
     Your answer must be precise regarding the requirements and your tone must be professional. You MUST strictly output the results conforming to the requested schema.
 

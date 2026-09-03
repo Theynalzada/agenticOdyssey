@@ -1,4 +1,5 @@
 # Importing Dependencies
+from langchain_mcp_adapters.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import BaseChatModel
 from langchain.agents import create_agent
@@ -15,13 +16,12 @@ class VisaAgentResponse(BaseModel):
   source: Optional[List[str]] = Field(default=None, description="The list of sources a user can use to get more information regarding visa acquiring process")
 
 # Defining an asynchronous function
-def build_visa_agent(llm: BaseChatModel, agent_tools: list) -> CompiledStateGraph:
+def build_visa_agent(llm: BaseChatModel, agent_tools: List[StructuredTool]) -> CompiledStateGraph:
   # Defining a system prompt
   visa_system_prompt=f"""
   You are a visa expert. You are extremely capable of
   finding detailed information based on visa requirements of a country a user wants to visit. 
   Focus your search and response on this specific country.
-  You MUST use '{agent_tools[0].name}' tool to answer user's questions regarding visa.
   Your answer must be precise regarding the requirements and your tone must be professional. 
   You MUST strictly output the results conforming to the requested schema.
 
