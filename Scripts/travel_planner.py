@@ -1,11 +1,11 @@
 # Importing Dependencies
+from langchain.chat_models import init_chat_model, BaseChatModel
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.messages import ToolMessage, HumanMessage
 from langchain.agents import create_agent, AgentState
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
-from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
 from flight_agent import build_flight_agent
 from hotel_agent import build_hotel_agent
@@ -55,7 +55,7 @@ def web_search(query: str) -> dict:
     return results
 
 # Defining an asynchronous function
-async def build_supervisor_agent() -> CompiledStateGraph:
+async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph:
     # Instantiating the MCP client
     mcp_client=MultiServerMCPClient(connections={"kiwi": {"transport": "streamable-http",
                                                           "url": "https://mcp.kiwi.com"}})
@@ -67,13 +67,13 @@ async def build_supervisor_agent() -> CompiledStateGraph:
     flight_tools=[i for i in mcp_tools if i.name=="search-flight"]
     
     # Building the flight agent
-    flight_agent=build_flight_agent(agent_tools=flight_tools)
+    flight_agent=build_flight_agent(llm=llm, agent_tools=flight_tools)
     
     # Building the hotel agent
-    hotel_agent=build_hotel_agent(agent_tools=[web_search])
+    hotel_agent=build_hotel_agent(llm=llm, agent_tools=[web_search])
     
     # Building the hotel agent
-    visa_agent=build_visa_agent(agent_tools=[web_search])
+    visa_agent=build_visa_agent(llm=llm, agent_tools=[web_search])
     
     # Configuring the agent memory
     agent_memory_config={"configurable": {"thread_id": "1"}}
@@ -144,8 +144,7 @@ async def build_supervisor_agent() -> CompiledStateGraph:
         user_query=f"As citizen of {origin_country}, what are the visa requirements to visit {destination_country}?"
         
         # Sending request to the agent
-        response=visa_agent.invoke(input={"messages": [HumanMessage(content=user_query)]},
-                                   config=agent_memory_config)
+        response=visa_agent.invoke(input={"messages": [HumanMessage(content=user_query)]})
         
         # Extracting the structured output
         return response.get("structured_response")
@@ -170,8 +169,7 @@ async def build_supervisor_agent() -> CompiledStateGraph:
         user_query=f"Find the top {n_hotels} {hotel_filter} {hotel_class}-star hotels in {destination_city}."
                 
         # Sending request to the agent
-        response=hotel_agent.invoke(input={"messages": [HumanMessage(content=user_query)]},
-                                    config=agent_memory_config)
+        response=hotel_agent.invoke(input={"messages": [HumanMessage(content=user_query)]})
         
         # Extracting the structured output
         return response.get("structured_response")
@@ -219,8 +217,7 @@ async def build_supervisor_agent() -> CompiledStateGraph:
         """
         
         # Sending request to the agent
-        response=flight_agent.invoke(input={"messages": [HumanMessage(content=user_query)]},
-                                     config=agent_memory_config)
+        response=await flight_agent.ainvoke(input={"messages": [HumanMessage(content=user_query)]})
         
         # Extracting the structured output
         return response.get("structured_response")

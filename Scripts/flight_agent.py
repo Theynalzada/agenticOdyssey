@@ -1,21 +1,9 @@
 # Importing Dependencies
-from langchain.agents.middleware import SummarizationMiddleware
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
-from langchain.chat_models import init_chat_model
+from langchain.chat_models import BaseChatModel
 from langchain.agents import create_agent
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from dotenv import load_dotenv
-
-# Loading environment variables
-load_dotenv()
-
-# Defining the model name
-model_name="gpt-5-nano"
-
-# Instantiating the LLM
-llm=init_chat_model(model=model_name)
 
 # Instantiating the response schema for tickets
 class TicketDetails(BaseModel):
@@ -42,7 +30,7 @@ class FlightAgentResponse(BaseModel):
     tickets: List[TicketDetails]
 
 # Defining an asynchronous function
-async def build_flight_agent(agent_tools: list) -> CompiledStateGraph:
+async def build_flight_agent(llm: BaseChatModel, agent_tools: list) -> CompiledStateGraph:
     # Defining a system prompt
     flight_system_prompt=f"""
     You are a precise flight search expert.
@@ -51,18 +39,11 @@ async def build_flight_agent(agent_tools: list) -> CompiledStateGraph:
     You MUST strictly output the results conforming to the requested schema.
     """
 
-    # Instantiating the conversation summarization for the memory
-    flight_memory_middleware=SummarizationMiddleware(model=llm,
-                                                     trigger=("fraction", 0.75),
-                                                     keep=("fraction", 0.25))
-
     # Instantiating the agent
     flight_agent=create_agent(model=llm,
                               tools=agent_tools,
                               system_prompt=flight_system_prompt,
-                              middleware=[flight_memory_middleware],
                               response_format=FlightAgentResponse,
-                              checkpointer=InMemorySaver(),
                               name="flight_agent")
     
     # Returning the flight agent
