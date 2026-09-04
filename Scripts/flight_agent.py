@@ -7,21 +7,24 @@ from typing import List, Literal, Optional
 from langchain.agents import create_agent
 from pydantic import BaseModel, Field
 
-# Instantiating the response schema for tickets
-class TicketDetails(BaseModel):
-    ticket_type: str = Field(description="e.g., Departure Leg or Return Leg")
-    route: str = Field(description="The city-to-city route (e.g., 'Baku --> London'). You MUST use city names, NEVER full airport names.")
+# Instantiating the response schema based on the flight segment
+class FlightSegment(BaseModel):
     departure_airport: str = Field(description="The full name of the departure airport (e.g., Heydar Aliyev International)")
     departure_airport_code: Optional[str] = Field(default=None, description="The 3-letter IATA code (e.g., GYD)")
     departure_time: str
-    duration: str
+    duration: str = Field(description="The duration of this specific segment (e.g., '3h 5m')")
     carrier: str = Field(description="The full airline name (e.g., 'Azerbaijan Airlines'). You must convert and write the full name, NEVER output 2-letter IATA codes like 'J2'.")
     operating_carrier: Optional[str] = Field(default=None, description="Only if operated on behalf of another carrier")
-    connection_number: Optional[str] = Field(default=None, description="The flight number or connection ID (e.g., J2 8105)")
-    operating_connection_number: Optional[str] = Field(default=None, description="Only if operated on behalf of another carrier")
-    arrival_airport: str = Field(description="The full name of the arrival airport (e.g., Gatwick Airport)")
-    arrival_airport_code: Optional[str] = Field(default=None, description="The 3-letter IATA code (e.g., LGW, LHR)")
+    arrival_airport: str = Field(description="The full name of the arrival airport (e.g., Istanbul Airport)")
+    arrival_airport_code: Optional[str] = Field(default=None, description="The 3-letter IATA code (e.g., IST, SAW)")
     arrival_time: str
+
+# Instantiating the resonse schema based on the journey
+class Journey(BaseModel):
+    journey_type: str = Field(description="e.g., 'Outbound' or 'Inbound'")
+    route: str = Field(description="The overall city-to-city route (e.g., 'Baku --> London'). You MUST use city names, NEVER full airport names.")
+    total_duration: str = Field(description="The total duration of the journey, including layovers")
+    segments: List[FlightSegment] = Field(description="The individual physical flights that make up this journey")
 
 # Instantiating the response schema for flight that meets the conditions
 class FlightOption(BaseModel):
@@ -34,7 +37,7 @@ class FlightOption(BaseModel):
     n_cabin_baggage: Optional[int] = Field(default=0, description="The number of cabin baggage by the user. If the number of cabin baggage has not been specified then you MUST default to 0.")
     cabin_class: Optional[Literal["Economy", "Premium Economy", "Business", "First"]] = Field(default="Economy", description="The cabin class the user wants to fly with. If the cabin class has not been specified, then you MUST default to 'Economy'.")
     booking_link: str = Field(description="URL for booking")
-    tickets: List[TicketDetails] = Field(description="The legs of this specific flight option (e.g., the Departure leg and the Return leg).")
+    journeys: List[Journey] = Field(description="The directional journeys (e.g., Outbound and Inbound) that make up this flight option.")
 
 # Instantiating the response schema for all flights that meet the conditions
 class FlightAgentResponse(BaseModel):
@@ -48,12 +51,14 @@ async def build_flight_agent(llm: BaseChatModel, agent_tools: List[StructuredToo
 
     CRITICAL RULES:
         1. Base your response STRICTLY on the real data returned by your search tools.
-        2. NEVER invent, guess, or hallucinate flight numbers, times, prices, or airlines.
-        3. PREVENT DATA DUPLICATION: When parsing multiple flight options, process each one individually. Pay strict attention to exact prices, exact flight numbers, and specific airports (e.g., IST vs SAW). DO NOT blindly copy-paste data from one flight option to another.
-        4. You MUST always use the default value if user has not provided any for a particular search criteria.
-        5. When executing the flight search tool, you MUST explicitly pass 'USD' as the currency parameter.
-        6. Return the top 3 most relevant flight options that satisfy the criteria. Extract the specific flight number for every leg.
-        7. Strictly output the results conforming to the requested schema.
+        2. NEVER invent, guess, or hallucinate times, prices, or airlines.
+        3. PREVENT DATA DUPLICATION: When parsing multiple flight options, process each one individually. Pay strict attention to exact prices, departure/arrival times, and specific airports (e.g., IST vs SAW). DO NOT blindly copy-paste data from one flight option to another.
+        4. You MUST parse both OUTBOUND and INBOUND flights with the correct data 
+        5. HIERARCHICAL PARSING: A 'FlightOption' consists of 'Journeys' (Outbound/Inbound). Each 'Journey' consists of one or more 'FlightSegments' (the actual physical flights). Accurately map layovers into multiple segments within a journey.
+        6. You MUST always use the default value if user has not provided any for a particular search criteria.
+        7. When executing the flight search tool, you MUST explicitly pass 'USD' as the currency parameter.
+        8. Return the top 3 most relevant flight options that satisfy the criteria.
+        9. Strictly output the results conforming to the requested schema.
 
     Your answer must be precise regarding the requirements and your tone must be professional.
     """
