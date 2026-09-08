@@ -1,6 +1,5 @@
 {
   "dependencies": ["."],
-  "python_path": "./Scripts",
   "graphs": {
     "agent": "./Scripts/travel_planner.py:build_supervisor_agent"
   },

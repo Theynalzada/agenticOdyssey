@@ -1,11 +1,10 @@
 # Importing Dependencies
 from langchain.agents.middleware import dynamic_prompt, ModelRequest, SummarizationMiddleware
 from langchain.messages import ToolMessage, HumanMessage, SystemMessage
-from flight_agent import build_flight_agent, FlightAgentResponse
+from Scripts.flight_agent import build_flight_agent, FlightAgentResponse
+from Scripts.hotel_agent import build_hotel_agent, HotelAgentResponse
+from Scripts.visa_agent import build_visa_agent, VisaAgentResponse
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from hotel_agent import build_hotel_agent, HotelAgentResponse
-from visa_agent import build_visa_agent, VisaAgentResponse
-from langchain_core.language_models import BaseChatModel
 from langchain.agents import create_agent, AgentState
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
@@ -75,7 +74,7 @@ class SupervisorAgentResponse(BaseModel):
     flight_info: Optional[FlightAgentResponse] = Field(default=None, description="The flight agent's structured response, populated exactly as returned once consult_flight_agent has been called. Leave as None until then.")
     
 # Defining an asynchronous function
-async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph:
+async def build_supervisor_agent() -> CompiledStateGraph:
     # Instantiating the MCP client
     mcp_client=MultiServerMCPClient(connections={"tavily-mcp": {"command": "npx", 
                                                                 "transport": "stdio",
@@ -168,9 +167,17 @@ async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph
         # Guarding against missing prerequisites instead of crashing
         if not destination_country or not countryFrom:
             return {"error": "Missing destination_country or countryFrom. Call update_state with these fields first."}
+          
+        # Extracting the user language from the context
+        user_language=runtime.context.user_language
         
         # Constructing the user query
-        user_query=f"As citizen of {countryFrom.title()}, what are the visa requirements to visit {destination_country.title()}?"
+        user_query=f"""
+        As citizen of {countryFrom.title()}, what are the visa requirements to visit {destination_country.title()}?
+        
+        IMPORTANT:
+        Provide all textual information in {user_language}.
+        """
         
         # Sending request to the agent
         response=await visa_agent.ainvoke(input={"messages": [HumanMessage(content=user_query)]})
@@ -183,7 +190,7 @@ async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph
     
     # Defining a tool to invoke the hotel agent
     @tool
-    async def consult_hotel_agent(runtime: ToolRuntime) -> str:
+    async def consult_hotel_agent(runtime: ToolRuntime) -> dict:
         """Consult the hotel agent to find accommodations."""
         # Extracting the destination city where a user wants to go to
         destination_city=runtime.state.get("destination_city")
@@ -205,7 +212,9 @@ async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph
         stars=stars if stars else 5
         
         # Constructing the user query
-        user_query=f"Find {n_hotels} {stars}-star hotels in {destination_city.title()}."
+        user_query=f"""
+        Find {n_hotels} {stars}-star hotels in {destination_city.title()}.
+        """
                 
         # Sending request to the agent
         response=await hotel_agent.ainvoke(input={"messages": [HumanMessage(content=user_query)]})
