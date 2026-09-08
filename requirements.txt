@@ -1,0 +1,6 @@
+langchain==1.4.0
+langchain_core==1.6.2
+langchain_mcp_adapters==0.3.2
+langgraph==1.2.11
+pydantic==2.13.5
+python-dotenv==1.2.3

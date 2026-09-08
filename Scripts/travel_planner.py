@@ -1,17 +1,19 @@
 # Importing Dependencies
+from langchain.agents.middleware import dynamic_prompt, ModelRequest, SummarizationMiddleware
 from langchain.messages import ToolMessage, HumanMessage, SystemMessage
-from langchain.agents.middleware import SummarizationMiddleware
+from flight_agent import build_flight_agent, FlightAgentResponse
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from hotel_agent import build_hotel_agent, HotelAgentResponse
+from visa_agent import build_visa_agent, VisaAgentResponse
 from langchain_core.language_models import BaseChatModel
 from langchain.agents import create_agent, AgentState
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
-from flight_agent import build_flight_agent
-from hotel_agent import build_hotel_agent
-from visa_agent import build_visa_agent
+from pydantic import Field, BaseModel
 from langgraph.types import Command
+from dataclasses import dataclass
 from dotenv import load_dotenv
 from typing import Optional
 from os import environ
@@ -24,7 +26,30 @@ model_name="gpt-5-nano"
 
 # Instantiating the LLM
 llm=init_chat_model(model=model_name)
+
+# Creating a context for the agent
+@dataclass
+class SupervisorContext:
+  user_language: str = "English"
+
+# Creating a dynamic prompt
+@dynamic_prompt
+def update_system_prompt(request: ModelRequest) -> SystemMessage:
+  """Update the language that will be used throughout conversation based on user's request."""
+  # Extracting the user language
+  user_language=request.runtime.context.user_language
+  
+  # Extracting the user language
+  system_prompt=request.system_message.content
+  
+  # Creating a condition based on the user language
+  if user_language!="English":
+    # Updating the system prompt in case the user language is not English
+    system_prompt+=f"You MUST communicate with the user in {user_language} throughout the conversation."
     
+  # Returning the system prompt
+  return SystemMessage(content=system_prompt)
+  
 # Defining the agent state
 class SupervisorState(AgentState):
     destination_country: Optional[str]
@@ -41,6 +66,13 @@ class SupervisorState(AgentState):
     n_children: Optional[int]
     n_infants: Optional[int]
     n_checked_baggage: Optional[int]
+
+# Defining the response format for the supervisor agent
+class SupervisorAgentResponse(BaseModel):
+    message_to_user: Optional[str] = Field(default=None, description="Any conversational text for the user — a clarifying question when required trip details are still missing, or a brief wrap-up note once results are populated below. Do NOT restate or paraphrase the structured data in visa_info/hotel_info/flight_info here; that data speaks for itself.")
+    visa_info: Optional[VisaAgentResponse] = Field(default=None, description="The visa agent's structured response, populated exactly as returned once consult_visa_agent has been called. Leave as None until then.")
+    hotel_info: Optional[HotelAgentResponse] = Field(default=None, description="The hotel agent's structured response, populated exactly as returned once consult_hotel_agent has been called. Leave as None until then.")
+    flight_info: Optional[FlightAgentResponse] = Field(default=None, description="The flight agent's structured response, populated exactly as returned once consult_flight_agent has been called. Leave as None until then.")
     
 # Defining an asynchronous function
 async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph:
@@ -262,21 +294,40 @@ async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph
       new detail (destination, dates, passenger counts, preferences, etc.), call update_state
       with ONLY the fields that were just revealed — never guess or invent values for fields
       the user hasn't mentioned.
+    - PROACTIVE CONSULTATION: the moment a consult_* tool's prerequisites are satisfied, you
+      MUST call it — do not wait for the user to explicitly ask for visa information, hotel
+      options, or flight options separately. If the user only mentions a destination and their
+      nationality, for example, that's enough to trigger consult_visa_agent immediately, even
+      if they didn't use the word "visa." Treat "plan my trip" as an implicit request for all
+      three, not just whichever one the user's phrasing happened to emphasize.
+    - Do not re-call a consult_* tool you've already successfully called for the current trip
+      unless the relevant details have since changed (e.g. a different destination or dates) —
+      avoid redundant re-consultation of unchanged information.
     - Before calling consult_visa_agent, make sure destination_country and countryFrom are
-      both known. If either is missing, ask the user for it rather than calling the tool.
+      both known. If either is missing, use message_to_user to ask for it, leave visa_info as
+      None, and do not call the tool yet.
     - Before calling consult_hotel_agent, make sure destination_city is known. n_hotels and
       stars are optional preferences — proceed without them if the user hasn't specified.
     - Before calling consult_flight_agent, make sure cityFrom, destination_city, and
-      departure_date are all known. Ask the user for any that are missing rather than guessing.
+      departure_date are all known. Use message_to_user to ask for any that are missing rather
+      than guessing, and leave flight_info as None until they're available.
     - If a consult_* tool returns an "error" key, that means required information is still
-      missing — ask the user for it, then retry the tool once you have it.
-    - Once you have consulted the relevant agents, summarize their findings for the user in
-      clear, organized prose. Do not just dump raw structured data — explain what it means for
-      their trip (e.g. whether they need a visa, what hotels are available, what flights exist).
+      missing — ask the user for it via message_to_user, then retry the tool once you have it.
+ 
+    OUTPUT FORMAT:
+    - You MUST always respond with the structured TravelPlannerResponse schema, on every turn —
+      including turns where you are only asking a clarifying question.
+    - visa_info, hotel_info, and flight_info must be populated with EXACTLY the structured data
+      returned by the corresponding consult_* tool, unmodified — do not paraphrase, summarize,
+      reformat, or drop any fields from what the tool returned. Leave a field as None if that
+      agent has not been consulted yet in this conversation.
+    - message_to_user carries any conversational text: a clarifying question when information is
+      missing, or a short, non-redundant wrap-up note once results are populated. Never restate
+      the contents of visa_info/hotel_info/flight_info in message_to_user — that data is already
+      structured and visible; message_to_user is only for things the structured fields can't say.
  
     Your tone must be professional, helpful, and clear.
     """
-    
     # Creating a system message
     supervisor_system_message=SystemMessage(content=supervisor_system_prompt)
     
@@ -287,8 +338,11 @@ async def build_supervisor_agent(llm: BaseChatModel = llm) -> CompiledStateGraph
                                          consult_hotel_agent,
                                          consult_flight_agent],
                                   system_prompt=supervisor_system_message,
-                                  middleware=[supervisor_memory_middleware],
+                                  middleware=[update_system_prompt, 
+                                              supervisor_memory_middleware],
+                                  response_format=SupervisorAgentResponse,
                                   state_schema=SupervisorState,
+                                  context_schema=SupervisorContext,
                                   checkpointer=InMemorySaver(),
                                   name="supervisor_agent")
     
